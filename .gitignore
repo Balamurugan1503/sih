@@ -28,4 +28,6 @@ next-env.d.ts
 # .gitignore
 backend/venv/
 venv 
-firebase-service-account.json
+
+# Ignore Firebase service account
+backend/firebase-service-account.json
