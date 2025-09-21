@@ -19,7 +19,13 @@ app = FastAPI(title="Crop Yield Prediction API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "https://4b840763-a29b-4843-8ef7-f75a455a14ea-00-3z5mdlxca059.sisko.replit.dev",
+        "https://*.replit.dev",
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -297,4 +303,4 @@ async def update_profile(profile: UserProfile, user = Depends(get_current_user))
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)
