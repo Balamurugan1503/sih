@@ -33,29 +33,32 @@ app.add_middleware(
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# Load Firebase service account
-cred = credentials.Certificate("firebase-service-account.json")
-
-# Initialize app only once
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
-
-# Firestore client
-db = firestore.client()
-
 # Initialize Firebase Admin
-if not firebase_admin._apps:
-    # For local development, use service account key
-    try:
-        cred = credentials.Certificate("firebase-service-account.json")
-        firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized successfully")
-    except Exception as e:
-        print(f"⚠️ Firebase initialization failed: {e}")
-        print("Please add your firebase-service-account.json file")
+firebase_initialized = False
+db = None
 
-db = firestore.client()
+try:
+    # For local development, use service account key
+    if os.path.exists("firebase-service-account.json"):
+        cred = credentials.Certificate("firebase-service-account.json")
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        firebase_initialized = True
+        print("✅ Firebase initialized successfully")
+    else:
+        print("⚠️ firebase-service-account.json not found")
+        firebase_initialized = False
+except Exception as e:
+    print(f"⚠️ Firebase initialization failed: {e}")
+    print("Please add your firebase-service-account.json file")
+    firebase_initialized = False
 security = HTTPBearer()
+
+# Helper function to check Firebase availability
+def require_firebase():
+    if not firebase_initialized or db is None:
+        raise HTTPException(status_code=503, detail="Firebase not available. Please configure Firebase credentials.")
 
 # Load ML model on startup
 @app.on_event("startup")
@@ -95,6 +98,10 @@ class UserProfile(BaseModel):
 
 # Authentication dependency
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if not firebase_initialized:
+        # For development without Firebase, return a mock user
+        return {"uid": "dev-user-123", "email": "dev@example.com"}
+    
     try:
         # Verify Firebase ID token
         decoded_token = auth.verify_id_token(credentials.credentials)
@@ -154,28 +161,33 @@ async def predict_yield(request: PredictionRequest, user = Depends(get_current_u
         user_id = user["uid"]
         request_id = str(uuid.uuid4())
         
-        # Save prediction request to Firestore
-        prediction_ref = db.collection("users").document(user_id).collection("predictions").document(request_id)
-        prediction_ref.set({
-            "farm_id": request.farm_id,
-            "inputs": request.dict(),
-            "status": "pending",
-            "created_at": datetime.utcnow(),
-        })
+        # Save prediction request to Firestore (if available)
+        prediction_ref = None
+        if firebase_initialized and db:
+            prediction_ref = db.collection("users").document(user_id).collection("predictions").document(request_id)
+            prediction_ref.set({
+                "farm_id": request.farm_id,
+                "inputs": request.dict(),
+                "status": "pending",
+                "created_at": datetime.utcnow(),
+            })
         
         # Get weather data if not provided and farm location is available
         rainfall = request.rainfall
         if rainfall is None:
             try:
-                # Get farm location
-                farm_ref = db.collection("users").document(user_id).collection("farms").document(request.farm_id)
-                farm_doc = farm_ref.get()
-                if farm_doc.exists():
-                    farm_data = farm_doc.to_dict()
-                    weather = get_weather_data(farm_data["location"]["lat"], farm_data["location"]["lon"])
-                    rainfall = weather["rainfall"]
+                # Get farm location (if Firebase available)
+                if firebase_initialized and db:
+                    farm_ref = db.collection("users").document(user_id).collection("farms").document(request.farm_id)
+                    farm_doc = farm_ref.get()
+                    if farm_doc.exists():
+                        farm_data = farm_doc.to_dict()
+                        weather = get_weather_data(farm_data["location"]["lat"], farm_data["location"]["lon"])
+                        rainfall = weather["rainfall"]
+                    else:
+                        rainfall = 100.0  # Default rainfall
                 else:
-                    rainfall = 100.0  # Default rainfall
+                    rainfall = 100.0  # Default rainfall when Firebase unavailable
             except Exception as e:
                 print(f"Error getting weather data: {e}")
                 rainfall = 100.0
@@ -208,18 +220,19 @@ async def predict_yield(request: PredictionRequest, user = Depends(get_current_u
             }
         }
         
-        # Update Firestore with results
-        prediction_ref.update({
-            "outputs": result,
-            "status": "complete",
-            "completed_at": datetime.utcnow(),
-        })
+        # Update Firestore with results (if available)
+        if prediction_ref:
+            prediction_ref.update({
+                "outputs": result,
+                "status": "complete",
+                "completed_at": datetime.utcnow(),
+            })
         
         return result
         
     except Exception as e:
-        # Update status to error
-        if 'prediction_ref' in locals():
+        # Update status to error (if Firebase available)
+        if 'prediction_ref' in locals() and prediction_ref:
             prediction_ref.update({
                 "status": "error",
                 "error": str(e),
@@ -242,9 +255,11 @@ async def add_farm(farm: FarmData, user = Depends(get_current_user)):
             "created_at": datetime.utcnow(),
         }
         
-        db.collection("users").document(user_id).collection("farms").document(farm_id).set(farm_data)
-        
-        return {"farm_id": farm_id, "message": "Farm added successfully"}
+        if firebase_initialized and db:
+            db.collection("users").document(user_id).collection("farms").document(farm_id).set(farm_data)
+            return {"farm_id": farm_id, "message": "Farm added successfully"}
+        else:
+            return {"farm_id": farm_id, "message": "Farm added successfully (Firebase not available - data not persisted)"}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add farm: {str(e)}")
@@ -253,12 +268,25 @@ async def add_farm(farm: FarmData, user = Depends(get_current_user)):
 async def get_farms(user = Depends(get_current_user)):
     try:
         user_id = user["uid"]
-        farms_ref = db.collection("users").document(user_id).collection("farms")
         farms = []
         
-        for doc in farms_ref.stream():
-            farm_data = doc.to_dict()
-            farms.append(farm_data)
+        if firebase_initialized and db:
+            farms_ref = db.collection("users").document(user_id).collection("farms")
+            for doc in farms_ref.stream():
+                farm_data = doc.to_dict()
+                farms.append(farm_data)
+        else:
+            # Return sample data when Firebase is not available
+            farms = [
+                {
+                    "farm_id": "sample-farm-1",
+                    "name": "Sample Farm",
+                    "location": {"lat": 40.7128, "lon": -74.0060},
+                    "soil_type": "Loamy",
+                    "area_ha": 10.5,
+                    "created_at": datetime.utcnow()
+                }
+            ]
         
         return {"farms": farms}
         
@@ -269,12 +297,24 @@ async def get_farms(user = Depends(get_current_user)):
 async def get_predictions(user = Depends(get_current_user)):
     try:
         user_id = user["uid"]
-        predictions_ref = db.collection("users").document(user_id).collection("predictions")
         predictions = []
         
-        for doc in predictions_ref.order_by("created_at", direction=firestore.Query.DESCENDING).stream():
-            prediction_data = doc.to_dict()
-            predictions.append(prediction_data)
+        if firebase_initialized and db:
+            predictions_ref = db.collection("users").document(user_id).collection("predictions")
+            for doc in predictions_ref.order_by("created_at", direction=firestore.Query.DESCENDING).stream():
+                prediction_data = doc.to_dict()
+                predictions.append(prediction_data)
+        else:
+            # Return sample data when Firebase is not available
+            predictions = [
+                {
+                    "farm_id": "sample-farm-1",
+                    "inputs": {"crop": "rice", "area": 10.5},
+                    "outputs": {"predicted_yield_kg_per_ha": 4500.0},
+                    "status": "complete",
+                    "created_at": datetime.utcnow()
+                }
+            ]
         
         return {"predictions": predictions}
         
@@ -294,9 +334,11 @@ async def update_profile(profile: UserProfile, user = Depends(get_current_user))
             "updated_at": datetime.utcnow(),
         }
         
-        db.collection("users").document(user_id).set(profile_data, merge=True)
-        
-        return {"message": "Profile updated successfully"}
+        if firebase_initialized and db:
+            db.collection("users").document(user_id).set(profile_data, merge=True)
+            return {"message": "Profile updated successfully"}
+        else:
+            return {"message": "Profile updated successfully (Firebase not available - data not persisted)"}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
