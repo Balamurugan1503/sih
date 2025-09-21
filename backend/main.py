@@ -22,12 +22,11 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5000",
-        "https://4b840763-a29b-4843-8ef7-f75a455a14ea-00-3z5mdlxca059.sisko.replit.dev",
-        "https://*.replit.dev",
-        "*"
+        "https://4b840763-a29b-4843-8ef7-f75a455a14ea-00-3z5mdlxca059.sisko.replit.dev"
     ],
+    allow_origin_regex=r"https://[a-z0-9-]+\.replit\.dev",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 import firebase_admin
@@ -76,6 +75,10 @@ class PredictionRequest(BaseModel):
     crop: str
     area: float
     production: float
+    N: float  # Nitrogen
+    P: float  # Phosphorus 
+    K: float  # Potassium
+    ph: float  # pH level
     rainfall: Optional[float] = None
     fertilizer: float
     pesticide: float
@@ -98,9 +101,17 @@ class UserProfile(BaseModel):
 
 # Authentication dependency
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if not firebase_initialized:
+    # Check if we're in development mode and allow mock auth
+    dev_mode = os.getenv("ENVIRONMENT", "production") == "development"
+    
+    if not firebase_initialized and dev_mode:
         # For development without Firebase, return a mock user
         return {"uid": "dev-user-123", "email": "dev@example.com"}
+    elif not firebase_initialized:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service not available",
+        )
     
     try:
         # Verify Firebase ID token
@@ -142,6 +153,19 @@ async def root():
         "status": "running",
         "model_loaded": predictor.is_loaded,
         "available_crops": predictor.get_available_crops() if predictor.is_loaded else []
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": {
+            "ml_model": predictor.is_loaded,
+            "firebase": firebase_initialized,
+            "api": True
+        }
     }
 
 @app.get("/api/crops")
@@ -192,14 +216,20 @@ async def predict_yield(request: PredictionRequest, user = Depends(get_current_u
                 print(f"Error getting weather data: {e}")
                 rainfall = 100.0
         
-        # Make prediction using the enhanced predictor
-        prediction_result = predictor.predict_yield(
+        # Make prediction using the enhanced predictor with soil nutrients
+        prediction_result = predictor.predict_yield_enhanced(
             crop=request.crop,
             area=request.area,
             production=request.production,
+            N=request.N,
+            P=request.P,
+            K=request.K,
+            ph=request.ph,
             rainfall=rainfall,
             fertilizer=request.fertilizer,
-            pesticide=request.pesticide
+            pesticide=request.pesticide,
+            temperature=request.temperature or 25.0,
+            humidity=request.humidity or 60.0
         )
         
         # Format response
@@ -345,4 +375,4 @@ async def update_profile(profile: UserProfile, user = Depends(get_current_user))
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

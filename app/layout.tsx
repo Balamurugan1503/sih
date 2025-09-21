@@ -8,9 +8,11 @@ import { Suspense } from "react"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "v0 App",
-  description: "Created with v0",
-  generator: "v0.app",
+  title: "CropPredict - AI-Powered Crop Yield Prediction System",
+  description: "Professional crop yield prediction using machine learning. Manage farms, predict yields, and optimize agricultural productivity with data-driven insights.",
+  keywords: "crop yield prediction, agriculture AI, farm management, machine learning, agricultural analytics",
+  authors: [{ name: "CropPredict Team" }],
+  generator: "Next.js",
 }
 
 export default function RootLayout({

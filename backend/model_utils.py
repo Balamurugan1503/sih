@@ -68,16 +68,43 @@ class CropYieldPredictor:
                      rainfall: float,
                      fertilizer: float,
                      pesticide: float) -> Dict:
+        """Legacy prediction method for backwards compatibility"""
+        return self.predict_yield_enhanced(
+            crop=crop, area=area, production=production, 
+            N=50.0, P=20.0, K=30.0, ph=6.5,  # Default soil values
+            rainfall=rainfall, fertilizer=fertilizer, pesticide=pesticide,
+            temperature=25.0, humidity=60.0
+        )
+    
+    def predict_yield_enhanced(self, 
+                              crop: str,
+                              area: float,
+                              production: float,
+                              N: float,
+                              P: float, 
+                              K: float,
+                              ph: float,
+                              rainfall: float,
+                              fertilizer: float,
+                              pesticide: float,
+                              temperature: float = 25.0,
+                              humidity: float = 60.0) -> Dict:
         """
-        Predict crop yield based on input features
+        Enhanced crop yield prediction with soil nutrients
         
         Args:
             crop: Crop type name
             area: Farm area in hectares
             production: Expected production in metric tons
+            N: Nitrogen content in soil
+            P: Phosphorus content in soil
+            K: Potassium content in soil
+            ph: Soil pH level
             rainfall: Annual rainfall in mm
             fertilizer: Fertilizer usage in kg
             pesticide: Pesticide usage in kg
+            temperature: Average temperature
+            humidity: Average humidity
             
         Returns:
             Dictionary with prediction results
@@ -89,14 +116,20 @@ class CropYieldPredictor:
             # Encode crop
             crop_encoded = self.encode_crop(crop)
             
-            # Prepare features array
+            # Prepare features array with enhanced soil data
             features = np.array([[
                 crop_encoded,
                 area,
                 production,
+                N,
+                P, 
+                K,
+                ph,
                 rainfall,
                 fertilizer,
-                pesticide
+                pesticide,
+                temperature,
+                humidity
             ]])
             
             # Make prediction
@@ -130,9 +163,15 @@ class CropYieldPredictor:
                     "crop": crop,
                     "area": area,
                     "production": production,
+                    "N": N,
+                    "P": P,
+                    "K": K,
+                    "ph": ph,
                     "rainfall": rainfall,
                     "fertilizer": fertilizer,
-                    "pesticide": pesticide
+                    "pesticide": pesticide,
+                    "temperature": temperature,
+                    "humidity": humidity
                 }
             }
             

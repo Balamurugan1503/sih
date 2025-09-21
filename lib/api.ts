@@ -13,22 +13,33 @@ class ApiClient {
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`
-    const headers = await this.getHeaders()
+    
+    try {
+      const headers = await this.getHeaders()
 
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...headers,
-        ...options.headers,
-      },
-    })
+      const response = await fetch(url, {
+        ...options,
+        timeout: 30000, // 30 second timeout
+        headers: {
+          ...headers,
+          ...options.headers,
+        },
+      })
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: "Unknown error" }))
-      throw new Error(error.detail || `HTTP ${response.status}`)
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ 
+          detail: `HTTP ${response.status}: ${response.statusText}` 
+        }))
+        throw new Error(error.detail || `API Error: ${response.status}`)
+      }
+
+      return response.json()
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error("🌐 Unable to connect to the backend. Please ensure the server is running.")
+      }
+      throw error
     }
-
-    return response.json()
   }
 
   // Farm management

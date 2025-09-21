@@ -21,7 +21,7 @@ args = "Frontend"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Backend"
+args = "Backend API"
 
 [[workflows.workflow]]
 name = "Frontend"
@@ -36,12 +36,12 @@ waitForPort = 5000
 outputType = "webview"
 
 [[workflows.workflow]]
-name = "Backend"
+name = "Backend API"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd backend && python main.py"
+args = "cd backend && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 waitForPort = 8000
 
 [workflows.workflow.metadata]
@@ -54,11 +54,6 @@ externalPort = 80
 [[ports]]
 localPort = 8000
 externalPort = 8000
-exposeLocalhost = true
-
-[[ports]]
-localPort = 42629
-externalPort = 3000
 
 [deployment]
 deploymentTarget = "autoscale"
